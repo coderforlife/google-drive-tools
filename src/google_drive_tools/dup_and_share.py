@@ -9,7 +9,7 @@ import sys
 import csv
 import argparse
 from functools import partial
-from typing import Optional, Iterable
+from typing import Optional, Iterable, TextIO
 import concurrent.futures
 
 from .utils import get_services, file_id_check, file_id_exists, get_file_id, copy_file, find_folder
@@ -18,7 +18,7 @@ from .utils import MIME_TYPE_DOC, MIME_TYPE_SHEET
 
 def dup_and_share(
         drive, docs, file_id: str, groups: dict[str, list[str]],
-        name_template: Optional[str] = None, dest: Optional[str] = None, make_dirs = False,
+        name_template: Optional[str] = None, dest: Optional[str] = None, make_dirs: bool = False,
         send_email: bool = True, email_msg: Optional[str] = None,
         strip_answers: bool = False, answer_replacement: str = "",
         ):
@@ -111,7 +111,8 @@ def get_drive_and_doc_services():
                         'dup-and-share-token.pickle', 'dup-and-share-credentials.json')
 
 
-def get_dest(drive, dest, make_dirs, parents):
+def get_dest(drive, dest: Optional[str],
+             make_dirs: bool, parents: list[str]) -> tuple[Optional[str], str]:
     """Determines the destination folder ID and the query string for the destination folder."""
     if dest:
         try:
@@ -125,7 +126,7 @@ def get_dest(drive, dest, make_dirs, parents):
     return dest_id, parents
 
 
-def strip_answers_from_doc(drive, docs, file_id, replacement=""):
+def strip_answers_from_doc(drive, docs, file_id: str, replacement: str = "") -> str:
     """
     Strips answers from a Google Doc. Returns a new document ID with the answers stripped. The
     new document must be deleted by the caller when done.
@@ -147,7 +148,7 @@ def strip_answers_from_doc(drive, docs, file_id, replacement=""):
     return file_id
 
 
-def __answers_to_batch_updates(content, updates, replacement=""):
+def __answers_to_batch_updates(content: list, updates: list[dict], replacement: str = "") -> None:
     for elem in content:
         if "paragraph" in elem:
             start = elem["startIndex"]
@@ -176,7 +177,7 @@ BOM = {
 }
 
 
-def groups_check(drive, value):
+def groups_check(drive, value: str) -> tuple[str, str] | TextIO:
     """
     Check that an argument can be used to load groups from. Possible values are:
         * a file path
@@ -199,7 +200,7 @@ def groups_check(drive, value):
     raise argparse.ArgumentTypeError('Invalid group file argument')
 
 
-def open_as_text_with_bom(filename):
+def open_as_text_with_bom(filename: str) -> TextIO:
     """
     Looks at the first few bytes of a file to determine the BOM encoding if it is there and
     reopens the file as text with the appropriate encoding (common for Excel-saved CSV files).
@@ -214,7 +215,7 @@ def open_as_text_with_bom(filename):
     return open(filename, 'rt', newline='')  # fallback to current system default
 
 
-def read_groups(drive, value) -> dict[str, list[str]]:
+def read_groups(drive, value: tuple[str, str] | TextIO) -> dict[str, list[str]]:
     """
     Reads the groups from a file. The file can be a CSV file or a Google Drive file. The file
     should have one of the following layouts:

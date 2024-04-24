@@ -2,6 +2,7 @@ import os
 import sys
 import pickle
 import argparse
+from typing import Optional
 from urllib.parse import urlparse
 
 try:
@@ -21,8 +22,10 @@ MIME_TYPE_SHORTCUT = 'application/vnd.google-apps.shortcut'
 FOLDER_OR_SHORTCUT = f"(mimeType='{MIME_TYPE_FOLDER}' or (mimeType='{MIME_TYPE_SHORTCUT}' and shortcutDetails.targetMimeType='{MIME_TYPE_FOLDER}'))"
 
 
-def get_credentials(scopes: list[str], token_name='token.pickle', cred_name='credentials.json',
-                    config_dir_name='google-app-credentials'):
+def get_credentials(scopes: list[str],
+                    token_name: str = 'token.pickle',
+                    cred_name: str = 'credentials.json',
+                    config_dir_name: str = 'google-app-credentials'):
     """
     Gets Google API credentials. The credentials are stored in a token file that is created
     automatically when the authorization flow completes for the first time. If the token file
@@ -100,13 +103,13 @@ def get_services(services: tuple[tuple[str, str]], scopes: tuple[str],
     return [build(name, version, credentials=credentials) for name, version in services]
 
 
-def escape(filename):
+def escape(filename: str) -> str:
     """Escapes a file name for use in a Google Drive query."""
     return filename.replace('\\', '\\\\').replace("'", "\\'")
 
 
 
-def find_folder(drive, path, make_dirs=False, parent_id='root'):
+def find_folder(drive, path: str, make_dirs: bool = False, parent_id: str = 'root') -> str:
     """
     Finds the folder ID for the given path. If the path doesn't exist and make_dirs is True, it
     will create the folders in the path. The path can be absolute (starting with '/') or relative
@@ -151,7 +154,7 @@ def find_folder(drive, path, make_dirs=False, parent_id='root'):
     return current
 
 
-def get_file_id(drive, file_name, condition):
+def get_file_id(drive, file_name: str, condition: str) -> Optional[str]:
     """Gets the ID of a file with the given name and condition."""
     response = drive.files().list(q=f"name='{escape(file_name)}' and {condition}", spaces='drive',
                                   fields='files(id)', supportsAllDrives=True).execute()
@@ -159,7 +162,7 @@ def get_file_id(drive, file_name, condition):
     return files[0].get('id') if files else None
 
 
-def file_id_check(value):
+def file_id_check(value: str) -> str:
     """
     Checks if a command line argument is a valid Google Document ID. If given as a URL, this
     attempts to extact the document ID from the URL.
@@ -183,7 +186,7 @@ def file_id_check(value):
     return value
 
 
-def file_id_exists(drive, value):
+def file_id_exists(drive, value: str) -> str:
     """
     Same as file_id_check() but also checks that the file exists in Google Drive.
     """
@@ -192,7 +195,7 @@ def file_id_exists(drive, value):
     return value
 
 
-def copy_file(drive, file_id, file_name, dest_id=None):
+def copy_file(drive, file_id: str, file_name: str, dest_id: Optional[str] = None) -> str:
     """Copies a file and moves it to the destination folder if one is given."""
     files = drive.files()
 
