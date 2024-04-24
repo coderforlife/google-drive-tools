@@ -1,0 +1,25 @@
+[project]
+name = "google-drive-tools"
+version = "0.1.0"
+authors = [
+  { name="Jeffrey Bush", email="jeff@coderforlife.com" },
+]
+description = "Tools for using Google Drive"
+readme = "README.md"
+requires-python = ">=3.9"
+dependencies = [
+  "google-api-python-client",
+  "google-auth-oauthlib",
+]
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+]
+
+[project.urls]
+Homepage = "https://github.com/coderforlife/google-drive-tools"
+Issues = "https://github.com/coderforlife/google-drive-tools/issues"
+
+[project.scripts]
+dup-and-share = "google_drive_tools.dup_and_share:main"
