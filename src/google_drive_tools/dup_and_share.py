@@ -61,29 +61,42 @@ def dup_and_share(
         doc_copy_id = copy_file(drive, file_id, file_name, dest_id)
 
         # Share the file with the students in the group
-        permissions = permissions.copy()
+        perms = permissions.copy()
         for email in emails:
-            permissions['emailAddress'] = email
-            drive.permissions().create(fileId=doc_copy_id, body=permissions).execute()
+            perms['emailAddress'] = email
+            drive.permissions().create(fileId=doc_copy_id, body=perms).execute()
         
         return True
 
-    # Go through each group (in parallel)
-    with concurrent.futures.ThreadPoolExecutor(max_workers=4) as executor:
-        futures = {executor.submit(__single, group, emails): group
-                   for group, emails in groups.items()}
-        for future in concurrent.futures.as_completed(futures):
-            group = futures[future]
-            try:
-                created = future.result()
-            except Exception as exc:
-                print(f"Failed to duplicate and share for {group}: {str(exc)}")
+    # Go through each group
+    for group, emails in groups.items():
+        try:
+            created = __single(group, emails)
+        except Exception as exc:
+            print(f"Failed to duplicate and share for {group}: {str(exc)}")
+        else:
+            if created:
+                print(f"Created {group}: {', '.join(groups[group])}")
             else:
-                if created:
-                    print(f"Created {group}: {', '.join(groups[group])}")
-                else:
-                    file_name = name_template.format(group)
-                    print(f"Skipped, document '{file_name}' already exists in same folder")
+                file_name = name_template.format(group)
+                print(f"Skipped, document '{file_name}' already exists in same folder")
+
+    # TODO: Go through each group (in parallel)
+    # with concurrent.futures.ThreadPoolExecutor(max_workers=4) as executor:
+    #     futures = {executor.submit(__single, group, emails): group
+    #                for group, emails in groups.items()}
+    #     for future in concurrent.futures.as_completed(futures):
+    #         group = futures[future]
+    #         try:
+    #             created = future.result()
+    #         except Exception as exc:
+    #             print(f"Failed to duplicate and share for {group}: {str(exc)}")
+    #         else:
+    #             if created:
+    #                 print(f"Created {group}: {', '.join(groups[group])}")
+    #             else:
+    #                 file_name = name_template.format(group)
+    #                 print(f"Skipped, document '{file_name}' already exists in same folder")
 
     # Delete the temporary document
     if needs_deletion:
@@ -219,8 +232,7 @@ def read_groups(drive, value) -> dict[str, list[str]]:
     if mime_type == 'text/csv':
         data = files.get_media(fileId=file_id, supportsAllDrives=True).execute()
     else:
-        data = files.export_media(fileId=file_id, mimeType='text/csv',
-                                  supportsAllDrives=True).execute()
+        data = files.export_media(fileId=file_id, mimeType='text/csv').execute()
     return make_groups(csv.reader(data.decode().splitlines(keepends=True)))
 
 
@@ -239,12 +251,13 @@ def make_groups(data: Iterable[list[str]]) -> dict[str, list[str]]:
     data = iter(data)
     entry = next(data)
     n = len(entry)
-    if n < 2 or n == 2 and '@' not in entry[1] or n > 2 and '@' not in entry[2]:
+    if n < 2 or all('@' not in value for value in entry[1:]):
         entry = next(data)
-    if len(entry) != 3 or '@' in entry[1]:
+    n = len(entry)
+    if n != 3 or '@' in entry[1]:
         # group name plus 1 or more emails per entry
         process = lambda entry: (entry[0], [email for email in entry[1:] if '@' in email])
-    elif len(entry) > 1:
+    elif n > 1:
         # last name, first name, email per entry
         process = lambda entry: (entry[1] + ' ' + entry[0], [entry[2]])
     else:
@@ -275,30 +288,31 @@ row is skipped if it doesn't contain an email address (assumed to be a header).
     parser.add_argument('id', type=partial(file_id_exists, drive),
                         help="Google file ID or URL to copy")
     parser.add_argument('groups', type=partial(groups_check, drive),
-                        help="CSV file describing duplications to make, see below for details")
-    parser.add_argument(['--dest', '-d'],
+                        help="CSV or Google Sheet ID file describing duplications to make, see "
+                             "below for details")
+    parser.add_argument('--dest', '-d',
                         help="Destination to save the copies to. Either an ID or a path relative to "
                              "the file, defaults to the same folder as the file (supports .. and "
                              "starting with / for root)")
-    parser.add_argument(['--make-dirs', '-p'], action='store_true',
+    parser.add_argument('--make-dirs', '-p', action='store_true',
                         help="Create the destination folder (and its parents) if it doesn't exist")
-    parser.add_argument(['--name', '-n'],
+    parser.add_argument('--name', '-n',
                         help="Name of the copied files with a {} placeholder for the group name, "
                              "default is the 'name of the file - {}'")
-    parser.add_argument(['--strip-answers', '-a'], const=True, default=False, nargs='?',
+    parser.add_argument('--strip-answers', '-a', const=True, default=False, nargs='?',
                         help="Strip answers from the document before sharing. This only works for "
                              "Google Docs and removes all Heading-6 text (but leaves the paragraph "
                              "in place for styling). If a value is given, it will replace the "
                              "answers with that text.")
-    parser.add_argument(['--no-email', '-N'], action='store_true',
+    parser.add_argument('--no-email', '-N', action='store_true',
                         help="Do not notify individuals of the new shared files")
-    parser.add_argument(['--email', '-e'],
+    parser.add_argument('--email', '-e',
                         help="Additional email message to supply with the notification email")
 
     args = parser.parse_args()
 
     # Read the groups data
-    groups = read_groups(args.groups)
+    groups = read_groups(drive, args.groups)
 
     # Duplicate the document and share it with the students
     strip_answers = True if args.strip_answers is not False else None
