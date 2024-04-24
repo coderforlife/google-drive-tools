@@ -46,3 +46,4 @@ Once you have the credentials file copied to an appropriate location, you can ru
 * Stripping answers only works for Google Docs (could add support for Google Sheets)
 * Copying a document removes all comments and suggestions (limitation of Google Drive API)
 * Grabbing groups from a Google Sheet can only use the first sheet/tab
+* Slow, should be able to speed it up with multithreading, but then it deadlocks...
