@@ -7,6 +7,7 @@ from urllib.parse import urlparse
 
 try:
     from googleapiclient.discovery import build
+    from googleapiclient.errors import HttpError
     from google.auth.transport.requests import Request
     from google_auth_oauthlib.flow import InstalledAppFlow
 except ImportError:
@@ -19,7 +20,8 @@ MIME_TYPE_DOC = ('application/vnd.google-apps.document', 'application/vnd.google
 MIME_TYPE_SHEET = ('application/vnd.google-apps.spreadsheet', 'application/vnd.google-apps.ritz')
 MIME_TYPE_FOLDER = 'application/vnd.google-apps.folder'
 MIME_TYPE_SHORTCUT = 'application/vnd.google-apps.shortcut'
-FOLDER_OR_SHORTCUT = f"(mimeType='{MIME_TYPE_FOLDER}' or (mimeType='{MIME_TYPE_SHORTCUT}' and shortcutDetails.targetMimeType='{MIME_TYPE_FOLDER}'))"
+FOLDER_OR_SHORTCUT = f"(mimeType='{MIME_TYPE_FOLDER}' or " \
+    f"(mimeType='{MIME_TYPE_SHORTCUT}' and shortcutDetails.targetMimeType='{MIME_TYPE_FOLDER}'))"
 
 
 def get_credentials(scopes: list[str],
@@ -108,6 +110,40 @@ def escape(filename: str) -> str:
     return filename.replace('\\', '\\\\').replace("'", "\\'")
 
 
+def get_resolve_shortcut(drive, fileId: str, fields: str) -> str:
+    """
+    Gets information about a file, resolving shortcuts if needed. It is recommended to include 'id'
+    in the fields so that you have access to the updated ID if needed.
+
+    If the fields contains 'parents', then a key 'origParents' is added to the file with the
+    original parents if the file is a shortcut.
+    """
+    sep_fields = fields.split(',')
+    mod_fields = fields
+    if 'mimeType' not in sep_fields: mod_fields += ',mimeType'
+    if 'shortcutDetails' not in sep_fields: mod_fields += ',shortcutDetails'
+    file = drive.files().get(fileId=fileId, fields=mod_fields, supportsAllDrives=True).execute()
+    if file.get('mimeType') == MIME_TYPE_SHORTCUT:
+        fileId = file.get('shortcutDetails').get('targetId')
+        orig_parents = file.get('parents')
+        file = drive.files().get(fileId=fileId, fields=fields, supportsAllDrives=True).execute()
+        if 'parents' in sep_fields:
+            file['origParents'] = orig_parents
+    return file
+
+
+def get_folder_id(drive, folder: str, make_dirs: bool, parent_id: Optional[str] = None) -> str:
+    """
+    Determines the folder ID. The given folder can be an id or a path. If the folder doesn't exist
+    and make_dirs is True, it will create the folders in the path. The parent is used to determine
+    the parent folder if the path is relative.
+    """
+    try:
+        dest_id = file_id_exists(drive, folder)
+    except argparse.ArgumentTypeError:
+        dest_id = find_folder(drive, folder, make_dirs, parent_id if parent_id else 'root')
+    return dest_id
+
 
 def find_folder(drive, path: str, make_dirs: bool = False, parent_id: str = 'root') -> str:
     """
@@ -120,6 +156,7 @@ def find_folder(drive, path: str, make_dirs: bool = False, parent_id: str = 'roo
 
     Returns the ID of the folder.
     """
+    # TODO: allow escaping \ and / in the path
     files = drive.files()
 
     path = path.replace('\\', '/')
@@ -140,7 +177,8 @@ def find_folder(drive, path: str, make_dirs: bool = False, parent_id: str = 'roo
                 includeItemsFromAllDrives=True, supportsAllDrives=True).execute()
             folders = response.get('files', [])
             if not folders:
-                if not make_dirs: raise FileNotFoundError(f"Folder '{part}' not found in '{current}'")
+                if not make_dirs:
+                    raise FileNotFoundError(f"Folder '{part}' not found in '{current}'")
                 folder = files.create(body={
                     'name': part, 'mimeType': MIME_TYPE_FOLDER, 'parents': [current]
                 }, fields='id', supportsAllDrives=True).execute()
@@ -154,12 +192,19 @@ def find_folder(drive, path: str, make_dirs: bool = False, parent_id: str = 'roo
     return current
 
 
-def get_file_id(drive, file_name: str, condition: str) -> Optional[str]:
-    """Gets the ID of a file with the given name and condition."""
-    response = drive.files().list(q=f"name='{escape(file_name)}' and {condition}", spaces='drive',
-                                  fields='files(id)', supportsAllDrives=True).execute()
+def get_file_id(drive, name: str, parent_id: str, mimeType: Optional[str] = None) -> Optional[str]:
+    """Gets the ID of a file with the given name, parent directory, and optional mime type."""
+    condition = f"name='{escape(name)}' and '{parent_id}' in parents and trashed=false"
+    if mimeType: condition += f" and mimeType='{mimeType}'"
+    response = drive.files().list(q=condition, fields='files(id)',
+                                  includeItemsFromAllDrives=True, supportsAllDrives=True).execute()
     files = response.get('files', [])
     return files[0].get('id') if files else None
+
+
+def file_exists(drive, name: str, parent_id: str, mimeType: Optional[str] = None) -> bool:
+    """Checks if a given file name exists in a given directory with an optional given mime type."""
+    return get_file_id(drive, name, parent_id, mimeType) is not None
 
 
 def file_id_check(value: str) -> str:
@@ -202,11 +247,29 @@ def copy_file(drive, file_id: str, file_name: str, dest_id: Optional[str] = None
     # Copy the file for the group
     copied = files.copy(fileId=file_id, body={'name': file_name},
                         fields='id,parents', supportsAllDrives=True).execute()
-    doc_copy_id = copied.get('id')
+    new_id = copied.get('id')
 
     # Move the file to the destination folder
     if dest_id:
-        files.update(fileId=doc_copy_id, addParents=dest_id, supportsAllDrives=True,
+        files.update(fileId=new_id, addParents=dest_id, supportsAllDrives=True,
                      removeParents=','.join(copied.get('parents'))).execute()
 
-    return doc_copy_id
+    return new_id
+
+
+def get_all_pages(func, key: str, **kwargs: dict) -> list:
+    """
+    Get all pages from an API list() or similar function. The function is the function to call
+    (e.g. drive.files().list), the key is the key in the response dictionary containing the list
+    of values (e.g. 'files'), and all other arguments are passed to the function call.
+    """
+    response = func(**kwargs).execute()
+    lst = response.get(key, [])
+    while 'nextPageToken' in response:
+        try:
+            perms = func(pageToken=perms['nextPageToken'], **kwargs).execute()
+            lst.extend(perms.get(key, []))
+        except HttpError as error:
+            print(f"Error getting next page of {key}: {error}")
+            break
+    return lst

@@ -9,10 +9,11 @@ import sys
 import csv
 import argparse
 from functools import partial
-from typing import Optional, Iterable, TextIO
+from typing import Optional, Union, Iterable, TextIO
 import concurrent.futures
 
-from .utils import get_services, file_id_check, file_id_exists, get_file_id, copy_file, find_folder
+from .utils import get_services, file_id_check, file_id_exists, file_exists
+from .utils import get_resolve_shortcut, copy_file, get_folder_id
 from .utils import MIME_TYPE_DOC, MIME_TYPE_SHEET
 
 
@@ -25,16 +26,28 @@ def dup_and_share(
     """
     Uses the Google Drive and Docs services to duplicate a document and share it with a list of
     students in groups. The document is shared with each student in the group with write access.
+
+    :param drive: The Google Drive service object.
+    :param docs: The Google Docs service object.
+    :param file_id: The ID of the file to duplicate.
+    :param groups: A dictionary of group names to a list of emails.
+    :param name_template: The template for the name of the duplicated files. Use '{}' to insert the
+                          group name. Defaults to the original file name with '{}' appended.
+    :param dest: The destination folder ID or path. If a path, it is relative to the original file.
+                    If None, the file is copied to the same folder as the original file.
+    :param make_dirs: If True, create the destination folder if it doesn't exist.
+    :param send_email: If True, send an email to the students notifying them of the shared file.
+    :param email_msg: An additional message to include in the email.
+    :param strip_answers: If True, strip answers from the document before sharing.
+    :param answer_replacement: The text to replace the answers with when stripping them.
     """
     # Get info about the template file
-    response = drive.files().get(fileId=file_id, fields='name,mimeType,parents',
-                                 supportsAllDrives=True).execute()
-    title, mime_type = response.get('name'), response.get('mimeType')
+    response = get_resolve_shortcut(drive, file_id, fields='id,name,mimeType,parents')
+    file_id, title, mime_type = response.get('id'), response.get('name'), response.get('mimeType')
     print(f"Copying document {title} ({file_id})")
 
     # Determine destination folder ID
-    dest_id, parents = get_dest(drive, dest, make_dirs, response.get('parents'))
-    condition = f"mimeType='{mime_type}' and ({parents}) and trashed=false"
+    dest_id, parent = get_dest(drive, dest, make_dirs, response.get('parents')[0])
 
     # Get file template name
     if name_template is None: name_template = title
@@ -54,7 +67,7 @@ def dup_and_share(
         file_name = name_template.format(group)
 
         # Make sure file doesn't already exist (i.e. group hasn't already been processed)
-        if get_file_id(drive, file_name, condition):
+        if file_exists(drive, file_name, parent, mime_type):
             return False
 
         # Copy the file for the group
@@ -112,18 +125,11 @@ def get_drive_and_doc_services():
 
 
 def get_dest(drive, dest: Optional[str],
-             make_dirs: bool, parents: list[str]) -> tuple[Optional[str], str]:
+             make_dirs: bool, parent_id: str) -> tuple[Optional[str], str]:
     """Determines the destination folder ID and the query string for the destination folder."""
-    if dest:
-        try:
-            dest_id = file_id_exists(dest)
-        except argparse.ArgumentTypeError:
-            dest_id = find_folder(drive, dest, make_dirs, parents[0] if parents else 'root')
-        parents = f"'{dest_id}' in parents"
-    else:
-        dest_id = None
-        parents = ' or '.join(f"'{parent}' in parents" for parent in parents)
-    return dest_id, parents
+    dest_id = None
+    if dest: parent = dest_id = get_folder_id(drive, dest, parent_id, make_dirs)
+    return dest_id, parent
 
 
 def strip_answers_from_doc(drive, docs, file_id: str, replacement: str = "") -> str:
@@ -177,7 +183,7 @@ BOM = {
 }
 
 
-def groups_check(drive, value: str) -> tuple[str, str] | TextIO:
+def groups_check(drive, value: str) -> Union[tuple[str, str], TextIO]:
     """
     Check that an argument can be used to load groups from. Possible values are:
         * a file path
@@ -215,7 +221,7 @@ def open_as_text_with_bom(filename: str) -> TextIO:
     return open(filename, 'rt', newline='')  # fallback to current system default
 
 
-def read_groups(drive, value: tuple[str, str] | TextIO) -> dict[str, list[str]]:
+def read_groups(drive, value: Union[tuple[str, str], TextIO]) -> dict[str, list[str]]:
     """
     Reads the groups from a file. The file can be a CSV file or a Google Drive file. The file
     should have one of the following layouts:
@@ -300,7 +306,8 @@ row is skipped if it doesn't contain an email address (assumed to be a header).
     parser.add_argument('--name', '-n',
                         help="Name of the copied files with a {} placeholder for the group name, "
                              "default is the 'name of the file - {}'")
-    parser.add_argument('--strip-answers', '-a', const=True, default=False, nargs='?',
+    parser.add_argument('--strip-answers', '-a', metavar="replacement",
+                        const=True, default=False, nargs='?',
                         help="Strip answers from the document before sharing. This only works for "
                              "Google Docs and removes all Heading-6 text (but leaves the paragraph "
                              "in place for styling). If a value is given, it will replace the "
