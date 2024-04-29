@@ -257,6 +257,17 @@ def copy_file(drive, file_id: str, file_name: str, dest_id: Optional[str] = None
     return new_id
 
 
+def get_file_path(drive, file_id: str) -> list[str]:
+    """Gets the full path of the file with the given id."""
+    path = []
+    while file_id:
+        response = drive.files().get(fileId=file_id, fields='name,parents').execute()
+        path.append(response.get('name'))
+        file_id = response.get('parents', [''])[0]
+    path.reverse()
+    return path
+
+
 def get_all_pages(func, key: str, **kwargs: dict) -> list:
     """
     Get all pages from an API list() or similar function. The function is the function to call

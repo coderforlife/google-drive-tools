@@ -10,6 +10,7 @@ requires-python = ">=3.9"
 dependencies = [
   "google-api-python-client",
   "google-auth-oauthlib",
+  "pathspec",
 ]
 classifiers = [
     "Programming Language :: Python :: 3",
@@ -23,3 +24,4 @@ Issues = "https://github.com/coderforlife/google-drive-tools/issues"
 
 [project.scripts]
 dup-and-share = "google_drive_tools.dup_and_share:main"
+drive-cp-dir = "google_drive_tools.copy_dir:main"
