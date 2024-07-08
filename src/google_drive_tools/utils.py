@@ -94,7 +94,15 @@ def get_credentials(scopes: list[str],
             # Return the drive credentials
             return creds
 
-    raise FileNotFoundError("Credentials or token file not found")
+    #raise FileNotFoundError("Credentials and token file not found")
+
+    print("No token or credentials file found. To get started:", file = sys.stderr)
+    print(" * Go to https://console.cloud.google.com/apis/credentials", file = sys.stderr)
+    print(" * Create an OAuth Client ID Credentials", file = sys.stderr)
+    print(f" * Download the JSON file and rename to {cred_name}", file = sys.stderr)
+    print(f" * Move to the directory ~/.config/{config_dir_name}", file = sys.stderr)
+    print("See the README for more details", file = sys.stderr)
+    sys.exit(1)
 
 
 def get_services(services: tuple[tuple[str, str]], scopes: tuple[str],
