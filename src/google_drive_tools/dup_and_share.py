@@ -128,17 +128,20 @@ def get_dest(drive, dest: Optional[str],
              make_dirs: bool, parent_id: str) -> tuple[Optional[str], str]:
     """Determines the destination folder ID and the query string for the destination folder."""
     dest_id = None
-    if dest: parent = dest_id = get_folder_id(drive, dest, parent_id, make_dirs)
+    if dest: parent = dest_id = get_folder_id(drive, dest, make_dirs, parent_id)
+    else: parent = parent_id
     return dest_id, parent
 
 
-def strip_answers_from_doc(drive, docs, file_id: str, replacement: str = "") -> str:
+def strip_answers_from_doc(
+        drive, docs, file_id: str, replacement: str = "",
+        temp_name: str = "TEMPORARY DOC WITHOUT ANSWERS") -> str:
     """
     Strips answers from a Google Doc. Returns a new document ID with the answers stripped. The
     new document must be deleted by the caller when done.
     """
     # Duplicate the document instead of modifying the original
-    file_id = copy_file(drive, file_id, "TEMPORARY DOC WITHOUT ANSWERS")
+    file_id = copy_file(drive, file_id, temp_name)
 
     # Get the document content
     doc = docs.documents().get(documentId=file_id).execute()
