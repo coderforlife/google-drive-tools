@@ -21,7 +21,7 @@ def dup_and_share(
         drive, docs, file_id: str, groups: dict[str, list[str]],
         name_template: Optional[str] = None, dest: Optional[str] = None, make_dirs: bool = False,
         send_email: bool = True, email_msg: Optional[str] = None,
-        strip_answers: bool = False, answer_replacement: str = "",
+        strip_answers: Optional[bool] = None, answer_replacement: str = "",
         ):
     """
     Uses the Google Drive and Docs services to duplicate a document and share it with a list of
@@ -38,7 +38,8 @@ def dup_and_share(
     :param make_dirs: If True, create the destination folder if it doesn't exist.
     :param send_email: If True, send an email to the students notifying them of the shared file.
     :param email_msg: An additional message to include in the email.
-    :param strip_answers: If True, strip answers from the document before sharing.
+    :param strip_answers: If True, strip answers from the document before sharing; If None, check
+                          if there are answers to be stripped and prompt the user to confirm. 
     :param answer_replacement: The text to replace the answers with when stripping them.
     """
     # Get info about the template file
@@ -59,9 +60,13 @@ def dup_and_share(
 
     # Strip answers from the document
     needs_deletion = False
-    if strip_answers and mime_type in MIME_TYPE_DOC:
-        file_id = strip_answers_from_doc(drive, docs, file_id, answer_replacement)
-        needs_deletion = True
+    if mime_type in MIME_TYPE_DOC:
+        if strip_answers is None:
+            if has_answers_in_doc(docs, file_id):
+                strip_answers = get_yes_no_from_user("Strip answers from the document? [Y/n]: ", True)
+        if strip_answers:
+            file_id = strip_answers_from_doc(drive, docs, file_id, answer_replacement)
+            needs_deletion = True
 
     def __single(group: str, emails: list[str]) -> bool:
         file_name = name_template.format(group)
@@ -133,6 +138,15 @@ def get_dest(drive, dest: Optional[str],
     return dest_id, parent
 
 
+def has_answers_in_doc(docs, file_id: str) -> bool:
+    """
+    Checks if a Google Doc has answers in it. This is done by checking if there are any Heading-6
+    elements in the document.
+    """
+    doc = docs.documents().get(documentId=file_id).execute()
+    return __has_answers_in_content(doc["body"]["content"])
+
+
 def strip_answers_from_doc(
         drive, docs, file_id: str, replacement: str = "",
         temp_name: str = "TEMPORARY DOC WITHOUT ANSWERS") -> str:
@@ -155,6 +169,21 @@ def strip_answers_from_doc(
     docs.documents().batchUpdate(documentId=file_id, body={'requests': updates}).execute()
 
     return file_id
+
+
+def __has_answers_in_content(content: list) -> bool:
+    for elem in content:
+        if "paragraph" in elem:
+            style = elem["paragraph"]["paragraphStyle"]["namedStyleType"]
+            if style == "HEADING_6":
+                return True
+        elif "table" in elem:
+            for row in elem["table"]["tableRows"]:
+                for cell in row["tableCells"]:
+                    if __has_answers_in_content(cell["content"]):
+                        return True
+    return False
+
 
 
 def __answers_to_batch_updates(content: list, updates: list[dict], replacement: str = "") -> None:
@@ -282,6 +311,17 @@ def make_groups(data: Iterable[list[str]]) -> dict[str, list[str]]:
     return groups
 
 
+def get_yes_no_from_user(prompt: str, default: bool = True) -> bool:
+    """
+    Prompts the user with a question and returns True if the answer is 'y'.
+    If the user presses enter, the default is returned.
+    """
+    answer = input(prompt).strip().lower()
+    while answer not in ('y', 'yes', 'n', 'no', ''):
+        answer = input("Please enter 'y' or 'n': ").strip().lower()
+    return answer or default
+
+
 def main():
     # Activate the Drive and Docs services
     drive, docs = get_drive_and_doc_services()
@@ -310,11 +350,14 @@ row is skipped if it doesn't contain an email address (assumed to be a header).
                         help="Name of the copied files with a {} placeholder for the group name, "
                              "default is the 'name of the file - {}'")
     parser.add_argument('--strip-answers', '-a', metavar="replacement",
-                        const=True, default=False, nargs='?',
+                        const=True, default=None, nargs='?',
                         help="Strip answers from the document before sharing. This only works for "
                              "Google Docs and removes all Heading-6 text (but leaves the paragraph "
                              "in place for styling). If a value is given, it will replace the "
-                             "answers with that text.")
+                             "answers with that text. Default is to prompt the user to confirm if "
+                             "answers are found.")
+    parser.add_argument('--no-strip-answers', '-A', action='store_false', dest='strip_answers',
+                        help="Do not strip answers from the document before sharing")
     parser.add_argument('--no-email', '-N', action='store_true',
                         help="Do not notify individuals of the new shared files")
     parser.add_argument('--email', '-e',
@@ -326,8 +369,9 @@ row is skipped if it doesn't contain an email address (assumed to be a header).
     groups = read_groups(drive, args.groups)
 
     # Duplicate the document and share it with the students
-    strip_answers = True if args.strip_answers is not False else None
-    replacement = args.strip_answers if isinstance(args.strip_answers, str) else ""
+    strip_answers, replacement = args.strip_answers, ""
+    if isinstance(strip_answers, str):  # leave True, False, and None alone
+        strip_answers, replacement = True, strip_answers
     dup_and_share(
         drive, docs, args.id, groups, name_template=args.name,
         dest=args.dest, make_dirs=args.make_dirs,
