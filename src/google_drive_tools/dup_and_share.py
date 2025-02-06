@@ -61,9 +61,8 @@ def dup_and_share(
     # Strip answers from the document
     needs_deletion = False
     if mime_type in MIME_TYPE_DOC:
-        if strip_answers is None:
-            if has_answers_in_doc(docs, file_id):
-                strip_answers = get_yes_no_from_user("Strip answers from the document? [Y/n]: ", True)
+        if strip_answers is None and has_answers_in_doc(docs, file_id):
+            strip_answers = get_yes_no_from_user("Strip answers from the document? [Y/n]: ", True)
         if strip_answers:
             file_id = strip_answers_from_doc(drive, docs, file_id, answer_replacement)
             needs_deletion = True
@@ -83,7 +82,7 @@ def dup_and_share(
         for email in emails:
             perms['emailAddress'] = email
             drive.permissions().create(fileId=doc_copy_id, body=perms).execute()
-        
+
         return True
 
     # Go through each group
@@ -133,8 +132,10 @@ def get_dest(drive, dest: Optional[str],
              make_dirs: bool, parent_id: str) -> tuple[Optional[str], str]:
     """Determines the destination folder ID and the query string for the destination folder."""
     dest_id = None
-    if dest: parent = dest_id = get_folder_id(drive, dest, make_dirs, parent_id)
-    else: parent = parent_id
+    if dest:
+        parent = dest_id = get_folder_id(drive, dest, make_dirs, parent_id)
+    else:
+        parent = parent_id
     return dest_id, parent
 
 
@@ -163,7 +164,7 @@ def strip_answers_from_doc(
     # Find all of the answers and replace them with the replacement text
     updates = []
     __answers_to_batch_updates(doc["body"]["content"], updates, replacement)
-    updates.reverse()  # this assumes that the updates are in order of start index, could do a sort instead?
+    updates.reverse()  # assumes updates are in order of start index, could do a sort instead?
 
     # Apply the updates to the document
     docs.documents().batchUpdate(documentId=file_id, body={'requests': updates}).execute()
@@ -194,8 +195,8 @@ def __answers_to_batch_updates(content: list, updates: list[dict], replacement: 
             style = elem["paragraph"]["paragraphStyle"]["namedStyleType"]
             if style == "HEADING_6":
                 if replacement:
-                    updates.append({"insertText": { "location": { "index": start }, "text": replacement }})
-                updates.append({"deleteContentRange": { "range": { "startIndex": start, "endIndex": end-1 } }})
+                    updates.append({"insertText": {"location": {"index": start}, "text": replacement}})
+                updates.append({"deleteContentRange": {"range": {"startIndex": start, "endIndex": end-1}}})
 
         elif "table" in elem:
             for row in elem["table"]["tableRows"]:
@@ -257,14 +258,15 @@ def read_groups(drive, value: Union[tuple[str, str], TextIO]) -> dict[str, list[
     """
     Reads the groups from a file. The file can be a CSV file or a Google Drive file. The file
     should have one of the following layouts:
-        * last-name,first-name,email (this is the CSV files the Gitkeeper uses - makes 1 copy per student)
+        * last-name,first-name,email (like a Gitkeeper CSV file - makes 1 copy per student)
         * group-name,email1,email2,... (makes 1 copy per group, duplicate group names are combined)
     Returns a dict of name:list-of-emails.
     """
     if not isinstance(value, tuple):
         # Assume it is a file object
-        with value: return make_groups(csv.reader(value))
-    
+        with value:
+            return make_groups(csv.reader(value))
+
     # Download the data
     file_id, mime_type = value
     files = drive.files()
@@ -295,10 +297,12 @@ def make_groups(data: Iterable[list[str]]) -> dict[str, list[str]]:
     n = len(entry)
     if n != 3 or '@' in entry[1]:
         # group name plus 1 or more emails per entry
-        process = lambda entry: (entry[0], [email for email in entry[1:] if '@' in email])
+        def process(entry):
+            return entry[0], [email for email in entry[1:] if '@' in email]
     elif n > 1:
         # last name, first name, email per entry
-        process = lambda entry: (entry[1] + ' ' + entry[0], [entry[2]])
+        def process(entry):
+            return entry[1] + ' ' + entry[0], [entry[2]]
     else:
         return groups # empty file
 
@@ -341,8 +345,8 @@ row is skipped if it doesn't contain an email address (assumed to be a header).
                         help="CSV or Google Sheet ID file describing duplications to make, see "
                              "below for details")
     parser.add_argument('--dest', '-d',
-                        help="Destination to save the copies to. Either an ID or a path relative to "
-                             "the file, defaults to the same folder as the file (supports .. and "
+                        help="Destination to save the copies to. Either an ID or a path relative to"
+                             " the file, defaults to the same folder as the file (supports .. and "
                              "starting with / for root)")
     parser.add_argument('--make-dirs', '-p', action='store_true',
                         help="Create the destination folder (and its parents) if it doesn't exist")

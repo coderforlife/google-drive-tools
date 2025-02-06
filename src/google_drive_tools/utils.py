@@ -6,10 +6,10 @@ from typing import Optional
 from urllib.parse import urlparse
 
 try:
-    from googleapiclient.discovery import build
-    from googleapiclient.errors import HttpError
-    from google.auth.transport.requests import Request
-    from google_auth_oauthlib.flow import InstalledAppFlow
+    from googleapiclient.discovery import build # type: ignore
+    from googleapiclient.errors import HttpError # type: ignore
+    from google.auth.transport.requests import Request # type: ignore
+    from google_auth_oauthlib.flow import InstalledAppFlow # type: ignore
 except ImportError:
     print("Failed to import Google APIs, make sure they are installed:", file=sys.stderr)
     print("    pip3 install google-api-python-client google-auth-oauthlib", file=sys.stderr)
@@ -118,7 +118,7 @@ def escape(filename: str) -> str:
     return filename.replace('\\', '\\\\').replace("'", "\\'")
 
 
-def get_resolve_shortcut(drive, fileId: str, fields: str) -> str:
+def get_resolve_shortcut(drive, file_id: str, fields: str) -> str:
     """
     Gets information about a file, resolving shortcuts if needed. It is recommended to include 'id'
     in the fields so that you have access to the updated ID if needed.
@@ -130,11 +130,11 @@ def get_resolve_shortcut(drive, fileId: str, fields: str) -> str:
     mod_fields = fields
     if 'mimeType' not in sep_fields: mod_fields += ',mimeType'
     if 'shortcutDetails' not in sep_fields: mod_fields += ',shortcutDetails'
-    file = drive.files().get(fileId=fileId, fields=mod_fields, supportsAllDrives=True).execute()
+    file = drive.files().get(fileId=file_id, fields=mod_fields, supportsAllDrives=True).execute()
     if file.get('mimeType') == MIME_TYPE_SHORTCUT:
-        fileId = file.get('shortcutDetails').get('targetId')
+        file_id = file.get('shortcutDetails').get('targetId')
         orig_parents = file.get('parents')
-        file = drive.files().get(fileId=fileId, fields=fields, supportsAllDrives=True).execute()
+        file = drive.files().get(fileId=file_id, fields=fields, supportsAllDrives=True).execute()
         if 'parents' in sep_fields:
             file['origParents'] = orig_parents
     return file
@@ -170,7 +170,7 @@ def find_folder(drive, path: str, make_dirs: bool = False, parent_id: str = 'roo
     path = path.replace('\\', '/')
     current = 'root' if path.startswith('/') else parent_id
     parts = path.strip('/').split('/')
-        
+
     for part in parts:
         if part == '': # skip empty parts
             continue
@@ -196,23 +196,23 @@ def find_folder(drive, path: str, make_dirs: bool = False, parent_id: str = 'roo
                 current = folder.get('shortcutDetails').get('targetId')
             else:
                 current = folder.get('id')
-    
+
     return current
 
 
-def get_file_id(drive, name: str, parent_id: str, mimeType: Optional[str] = None) -> Optional[str]:
+def get_file_id(drive, name: str, parent_id: str, mime_type: Optional[str] = None) -> Optional[str]:
     """Gets the ID of a file with the given name, parent directory, and optional mime type."""
     condition = f"name='{escape(name)}' and '{parent_id}' in parents and trashed=false"
-    if mimeType: condition += f" and mimeType='{mimeType}'"
+    if mime_type: condition += f" and mimeType='{mime_type}'"
     response = drive.files().list(q=condition, fields='files(id)',
                                   includeItemsFromAllDrives=True, supportsAllDrives=True).execute()
     files = response.get('files', [])
     return files[0].get('id') if files else None
 
 
-def file_exists(drive, name: str, parent_id: str, mimeType: Optional[str] = None) -> bool:
+def file_exists(drive, name: str, parent_id: str, mime_type: Optional[str] = None) -> bool:
     """Checks if a given file name exists in a given directory with an optional given mime type."""
-    return get_file_id(drive, name, parent_id, mimeType) is not None
+    return get_file_id(drive, name, parent_id, mime_type) is not None
 
 
 def file_id_check(value: str) -> str:
@@ -229,8 +229,8 @@ def file_id_check(value: str) -> str:
                 if '&' in value: value = value[:value.index('&')]
             else:
                 value = [part for part in url.path.split('/') if len(part) >= 25][-1]
-        except (ValueError, IndexError):
-            raise argparse.ArgumentTypeError('Invalid document id')
+        except (ValueError, IndexError) as ex:
+            raise argparse.ArgumentTypeError('Invalid document id') from ex
     elif len(value) < 25:
         raise argparse.ArgumentTypeError('Invalid document id')
     legal = 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_-'
