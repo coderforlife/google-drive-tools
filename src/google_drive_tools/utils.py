@@ -265,6 +265,22 @@ def copy_file(drive, file_id: str, file_name: str, dest_id: Optional[str] = None
     return new_id
 
 
+def find_or_create_file(drive, name: str, parent_id: str, mime_type: str) -> tuple[str, bool]:
+    """
+    Finds a file with the given name in the given parent directory. If the file doesn't exist, it
+    creates a new file with the given name in the parent directory. Returns the file ID and True
+    or False if the file was created or not.
+    """
+    file_id = get_file_id(drive, name, parent_id, mime_type)
+    created = False
+    if file_id is None:
+        file_id = drive.files().create(body={
+            'name': name, 'mimeType': mime_type, 'parents': [parent_id]
+        }, fields='id', supportsAllDrives=True).execute().get('id')
+        created = True
+    return file_id, created
+
+
 def get_file_path(drive, file_id: str) -> list[str]:
     """Gets the full path of the file with the given id."""
     path = []
