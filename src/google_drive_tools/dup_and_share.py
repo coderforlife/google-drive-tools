@@ -204,7 +204,8 @@ def __answers_to_batch_updates(content: list, updates: list[dict], replacement: 
             if style == "HEADING_6":
                 if replacement:
                     updates.append({"insertText": {"location": {"index": start}, "text": replacement}})
-                updates.append({"deleteContentRange": {"range": {"startIndex": start, "endIndex": end-1}}})
+                if start < end-1:  # don't delete the text if it is empty
+                    updates.append({"deleteContentRange": {"range": {"startIndex": start, "endIndex": end-1}}})
 
         elif "table" in elem:
             for row in elem["table"]["tableRows"]:
