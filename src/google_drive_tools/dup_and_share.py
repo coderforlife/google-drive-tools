@@ -4,24 +4,32 @@ Creates many duplicates of a Google Doc by appending a student's name to each
 copy of the file and then sharing the file with the student.
 """
 
+import argparse
+import csv
 import os
 import sys
-import csv
-import argparse
+from collections.abc import Iterable
 from functools import partial
-from typing import Optional, Union, Iterable, TextIO
-import concurrent.futures
+from typing import TextIO
 
-from .utils import get_services, file_id_check, file_id_exists, file_exists
-from .utils import get_resolve_shortcut, copy_file, get_folder_id
-from .utils import MIME_TYPE_DOC, MIME_TYPE_SHEET
+from .utils import (
+    MIME_TYPE_DOC,
+    MIME_TYPE_SHEET,
+    copy_file,
+    file_exists,
+    file_id_check,
+    file_id_exists,
+    get_folder_id,
+    get_resolve_shortcut,
+    get_services,
+)
 
 
 def dup_and_share(
         drive, docs, file_id: str, groups: dict[str, list[str]],
-        name_template: Optional[str] = None, dest: Optional[str] = None, make_dirs: bool = False,
-        send_email: bool = True, email_msg: Optional[str] = None,
-        strip_answers: Optional[bool] = None, answer_replacement: str = "",
+        name_template: str | None = None, dest: str | None = None, make_dirs: bool = False,
+        send_email: bool = True, email_msg: str | None = None,
+        strip_answers: bool | None = None, answer_replacement: str = "",
         ):
     """
     Uses the Google Drive and Docs services to duplicate a document and share it with a list of
@@ -90,10 +98,10 @@ def dup_and_share(
         try:
             created = __single(group, emails)
         except Exception as exc:
-            print(f"Failed to duplicate and share for {group}: {str(exc)}")
+            print(f"Failed to duplicate and share for {group}: {exc!s}")
         else:
             if created:
-                print(f"Created {group}: {', '.join(groups[group])}")
+                print(f"Created {group}: {', '.join(emails)}")
             else:
                 file_name = name_template.format(group)
                 print(f"Skipped, document '{file_name}' already exists in same folder")
@@ -128,8 +136,8 @@ def get_drive_and_doc_services():
                         'dup-and-share-token.pickle', 'dup-and-share-credentials.json')
 
 
-def get_dest(drive, dest: Optional[str],
-             make_dirs: bool, parent_id: str) -> tuple[Optional[str], str]:
+def get_dest(drive, dest: str | None,
+             make_dirs: bool, parent_id: str) -> tuple[str | None, str]:
     """Determines the destination folder ID and the query string for the destination folder."""
     dest_id = None
     if dest:
@@ -216,7 +224,7 @@ BOM = {
 }
 
 
-def groups_check(drive, value: str) -> Union[tuple[str, str], TextIO]:
+def groups_check(drive, value: str) -> tuple[str, str] | TextIO:
     """
     Check that an argument can be used to load groups from. Possible values are:
         * a file path
@@ -254,7 +262,7 @@ def open_as_text_with_bom(filename: str) -> TextIO:
     return open(filename, 'rt', newline='')  # fallback to current system default
 
 
-def read_groups(drive, value: Union[tuple[str, str], TextIO]) -> dict[str, list[str]]:
+def read_groups(drive, value: tuple[str, str] | TextIO) -> dict[str, list[str]]:
     """
     Reads the groups from a file. The file can be a CSV file or a Google Drive file. The file
     should have one of the following layouts:
@@ -331,14 +339,15 @@ def main():
     drive, docs = get_drive_and_doc_services()
 
     # Get the command line arguments
-    parser = argparse.ArgumentParser(description="""Duplicates a Google Drive file, updating the
-name to include a student/group's name and sharing it with them.""", epilog="""The CSV file must
-have one of the following layouts:
+    parser = argparse.ArgumentParser(description="""
+Duplicates a Google Drive file, updating the name to include a student/group's
+name and sharing it with them.""", epilog="""The CSV file must have one of the following layouts:
  * last-name,first-name,email (this is the CSV files the Gitkeeper uses - makes 1 copy per student)
  * group-name,email1,email2,... (makes 1 copy per group, duplicate group names are combined)
-Every row in the CSV file must be consistent (i.e. all groups or all individual students). First
-row is skipped if it doesn't contain an email address (assumed to be a header).
-""")
+Every row in the CSV file must be consistent (i.e. all groups or all individual
+students). First row is skipped if it doesn't contain an email address (assumed
+to be a header).
+""", formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument('id', type=partial(file_id_exists, drive),
                         help="Google file ID or URL to copy")
     parser.add_argument('groups', type=partial(groups_check, drive),
