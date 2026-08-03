@@ -52,11 +52,13 @@ def dup_and_share(
     """
     # Get info about the template file
     response = get_resolve_shortcut(drive, file_id, fields='id,name,mimeType,parents')
-    file_id, title, mime_type = response.get('id'), response.get('name'), response.get('mimeType')
+    file_id = response.get('id', '')
+    title: str = response.get('name', '')
+    mime_type: str = response.get('mimeType', '')
     print(f"Copying document {title} ({file_id})")
 
     # Determine destination folder ID
-    dest_id, parent = get_dest(drive, dest, make_dirs, response.get('parents')[0])
+    dest_id, parent = get_dest(drive, dest, make_dirs, response.get('parents', [])[0])
 
     # Get file template name
     if name_template is None: name_template = title
@@ -194,7 +196,6 @@ def __has_answers_in_content(content: list) -> bool:
     return False
 
 
-
 def __answers_to_batch_updates(content: list, updates: list[dict], replacement: str = "") -> None:
     for elem in content:
         if "paragraph" in elem:
@@ -202,8 +203,20 @@ def __answers_to_batch_updates(content: list, updates: list[dict], replacement: 
             end = elem["endIndex"]
             style = elem["paragraph"]["paragraphStyle"]["namedStyleType"]
             if style == "HEADING_6":
-                if replacement:
-                    updates.append({"insertText": {"location": {"index": start}, "text": replacement}})
+                repl = replacement
+                # if the text contains [[...]] anywhere in it, then it is a custom, inline, replacement, so we make that the replacement text instead of the default
+                # first combine all of the text in the paragraph into a single string, then search for all [[...]] and extract the text inside
+                text = "".join(e.get("textRun", {}).get("content", "") for e in elem["paragraph"].get("elements", []))
+                start_idx = text.index("[[") + 2
+                end_idx = text.index("]]", start_idx) if start_idx != 1 else -1
+                if start_idx < end_idx:
+                    repl = ""
+                    while start_idx < end_idx:
+                        repl = text[start_idx:end_idx]
+                        start_idx = text.find("[[", end_idx) + 2
+                        end_idx = text.find("]]", start_idx) if start_idx != 1 else -1
+                if repl:
+                    updates.append({"insertText": {"location": {"index": start}, "text": repl}})
                 if start < end-1:  # don't delete the text if it is empty
                     updates.append({"deleteContentRange": {"range": {"startIndex": start, "endIndex": end-1}}})
 
@@ -253,7 +266,8 @@ def open_as_text_with_bom(filename: str) -> TextIO:
     Looks at the first few bytes of a file to determine the BOM encoding if it is there and
     reopens the file as text with the appropriate encoding (common for Excel-saved CSV files).
     """
-    bom = open(filename, 'rb').read(4)
+    with open(filename, 'rb') as f:
+        bom = f.read(4)
     for i in range(len(bom), 1, -1):
         if bom[:i] in BOM:
             file = open(filename, 'rt', encoding=BOM[bom[:i]], newline='')
@@ -332,7 +346,7 @@ def get_yes_no_from_user(prompt: str, default: bool = True) -> bool:
     answer = input(prompt).strip().lower()
     while answer not in ('y', 'yes', 'n', 'no', ''):
         answer = input("Please enter 'y' or 'n': ").strip().lower()
-    return answer or default
+    return default if answer == '' else (answer in ('y', 'yes'))
 
 
 def main():
@@ -368,8 +382,9 @@ to be a header).
                         help="Strip answers from the document before sharing. This only works for "
                              "Google Docs and removes all Heading-6 text (but leaves the paragraph "
                              "in place for styling). If a value is given, it will replace the "
-                             "answers with that text. Default is to prompt the user to confirm if "
-                             "answers are found.")
+                             "answers with that text. Answers my also contain [[text]] which is" \
+                             "used as the replacement text. Default is to prompt the user to" \
+                             "confirm if answers are found.")
     parser.add_argument('--no-strip-answers', '-A', action='store_false', dest='strip_answers',
                         help="Do not strip answers from the document before sharing")
     parser.add_argument('--no-email', '-N', action='store_true',
